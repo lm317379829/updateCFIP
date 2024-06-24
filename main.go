@@ -153,7 +153,7 @@ func handleMain(config Config) {
 				}
 			}
 			if rid == "" || remortIP == "" {
-				log.Info("错误: 为获取到RID或REMORTIP")
+				log.Info("错误: 未获取到Rid或RemortIP")
 				continue
 			}
 			if localIP != remortIP {
