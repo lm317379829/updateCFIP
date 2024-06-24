@@ -78,7 +78,6 @@ func handleMain(config Config) {
 		header := map[string]string{
 			"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.54 Safari/537.36",
 		}
-		// url := fmt.Sprintf("%s.%s", name, domain)
 		dnsTypes := strings.Split(domainInfo[2], ",")
 		for _, dnsType := range dnsTypes {
 			dnsType := strings.TrimSpace(dnsType)
@@ -146,7 +145,7 @@ func handleMain(config Config) {
 			rid := ""
 			remortIP := ""
 			for _, record := range resultList {
-				if record.(map[string]interface{})["type"].(string) == "A" {
+				if record.(map[string]interface{})["type"].(string) == dnsType {
 					rid = record.(map[string]interface{})["id"].(string)
 					remortIP = record.(map[string]interface{})["content"].(string)
 					break
