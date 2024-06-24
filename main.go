@@ -178,6 +178,9 @@ func handleMain(config Config) {
 				} else {
 					log.Infof("%s.%s的ip更新失败", name, domain)
 				}
+			} else {
+				log.Infof("域名 %s.%s 的IP为 %s 未改变, 无需更新", name, domain, localIP)
+				continue
 			}
 		}
 	}
