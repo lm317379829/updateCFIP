@@ -51,17 +51,13 @@ func retryRequest(method, url string, body *bytes.Buffer, header map[string]stri
 
 		resp, err = client.Do(req)
 		if err == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			if err != nil {
-				return nil, err
-			} else {
-				// 请求成功，返回应体
-				return resp, nil
-			}
+			return resp, nil
 		}
 
 		// 请求失败，等待重试
 		log.Infof("请求 %s 失败, 等待  %ds 后重试: %v", url, retryDelay/1000000000, err)
 		time.Sleep(retryDelay)
+		resp.Body.Close()
 	}
 	return nil, fmt.Errorf("访问 %s 失败: %v", url, err)
 }
@@ -101,13 +97,11 @@ func handleMain(config Config) {
 			responseBody, err = io.ReadAll(resp.Body)
 			if err != nil {
 				log.Infof("错误: %s", err)
+				resp.Body.Close()
 				continue
 			}
 			resp.Body.Close()
 
-			if err != nil {
-				log.Infof("错误: %v", err)
-			}
 			localIP := string(responseBody)
 
 			header["X-Auth-Key"] = config.Key
@@ -122,9 +116,11 @@ func handleMain(config Config) {
 			responseBody, err = io.ReadAll(resp.Body)
 			if err != nil {
 				log.Infof("错误: %v", err)
+				resp.Body.Close()
 				continue
 			}
 			resp.Body.Close()
+
 			var result map[string]interface{}
 			json.Unmarshal(responseBody, &result)
 			zid := result["result"].([]interface{})[0].(map[string]interface{})["id"].(string)
@@ -136,18 +132,22 @@ func handleMain(config Config) {
 			responseBody, err = io.ReadAll(resp.Body)
 			if err != nil {
 				log.Infof("错误: %v", err)
+				resp.Body.Close()
 				continue
 			}
 			resp.Body.Close()
+
 			var dnsRecords map[string]interface{}
 			json.Unmarshal(responseBody, &dnsRecords)
 			resultList := dnsRecords["result"].([]interface{})
 			rid := ""
 			remortIP := ""
+			proxiable := false
 			for _, record := range resultList {
 				if record.(map[string]interface{})["type"].(string) == dnsType {
 					rid = record.(map[string]interface{})["id"].(string)
 					remortIP = record.(map[string]interface{})["content"].(string)
+					proxiable = record.(map[string]interface{})["proxiable"].(bool)
 					break
 				}
 			}
@@ -157,10 +157,11 @@ func handleMain(config Config) {
 			}
 			if localIP != remortIP {
 				params := map[string]interface{}{
-					"id":      zid,
-					"type":    dnsType,
-					"name":    fmt.Sprintf("%s.%s", name, domain),
-					"content": localIP,
+					"id":        zid,
+					"type":      dnsType,
+					"name":      fmt.Sprintf("%s.%s", name, domain),
+					"content":   localIP,
+					"proxiable": proxiable,
 				}
 				body, err := json.Marshal(params)
 				if err != nil {
@@ -175,11 +176,14 @@ func handleMain(config Config) {
 				if resp.StatusCode == 200 {
 					logStr := fmt.Sprintf("成功更新%s.%s的ip为%s", name, domain, localIP)
 					log.Info(logStr)
+					resp.Body.Close()
 				} else {
 					log.Infof("%s.%s的ip更新失败", name, domain)
+					resp.Body.Close()
 				}
 			} else {
 				log.Infof("域名 %s.%s 的IP为 %s 未改变, 无需更新", name, domain, localIP)
+				resp.Body.Close()
 				continue
 			}
 		}
