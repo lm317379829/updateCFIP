@@ -147,7 +147,7 @@ func handleMain(config Config) {
 				if record.(map[string]interface{})["type"].(string) == dnsType {
 					rid = record.(map[string]interface{})["id"].(string)
 					remortIP = record.(map[string]interface{})["content"].(string)
-					proxiable = record.(map[string]interface{})["proxiable"].(bool)
+					proxied = record.(map[string]interface{})["proxied"].(bool)
 					break
 				}
 			}
@@ -161,7 +161,7 @@ func handleMain(config Config) {
 					"type":      dnsType,
 					"name":      fmt.Sprintf("%s.%s", name, domain),
 					"content":   localIP,
-					"proxiable": proxiable,
+					"proxied": proxied,
 				}
 				body, err := json.Marshal(params)
 				if err != nil {
