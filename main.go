@@ -15,9 +15,14 @@ import (
 )
 
 type Config struct {
-	Email       string     `json:"email"`
 	Key         string     `json:"key"`
+	Email       string     `json:"email"`
 	DomainInfos [][]string `json:"domainInfos"`
+	Telegram    struct {
+		Update bool   `json:"update"`
+		Url    string `json:"url"`
+		ID     string `json:"id"`
+	} `json:"telegram,omitempty"`
 }
 
 func retryRequest(method, url string, body *bytes.Buffer, header map[string]string) (*http.Response, error) {
@@ -70,6 +75,7 @@ func handleMain(config Config) {
 		var responseBody []byte
 		var name = domainInfo[0]
 		var domain = domainInfo[1]
+		var needUpdate = true
 
 		header := map[string]string{
 			"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.54 Safari/537.36",
@@ -102,7 +108,30 @@ func handleMain(config Config) {
 			}
 			resp.Body.Close()
 
+			// 获取本地IP
 			localIP := string(responseBody)
+
+			defer func() {
+				needUpdate = true
+				if config.Telegram.Update && needUpdate {
+					// 更新IP到指定URL
+					content := fmt.Sprintf("域名 %s.%s 的IP已更新为 %s", name, domain, localIP)
+					params := map[string]string{
+						"chat_id": config.Telegram.ID,
+						"text":    content,
+					}
+					body, err := json.Marshal(params)
+					if err != nil {
+						log.Infof("错误: %v", err)
+						return
+					}
+					resp, err = retryRequest("POST", config.Telegram.Url, bytes.NewBuffer(body), header)
+					if err != nil {
+						log.Infof("获取IPV6错误: %v", err)
+						return
+					}
+				}
+			}()
 
 			header["X-Auth-Key"] = config.Key
 			header["X-Auth-Email"] = config.Email
@@ -157,11 +186,11 @@ func handleMain(config Config) {
 			}
 			if localIP != remortIP {
 				params := map[string]interface{}{
-					"id":        zid,
-					"type":      dnsType,
-					"name":      fmt.Sprintf("%s.%s", name, domain),
-					"content":   localIP,
-					"proxied":   proxied,
+					"id":      zid,
+					"type":    dnsType,
+					"name":    fmt.Sprintf("%s.%s", name, domain),
+					"content": localIP,
+					"proxied": proxied,
 				}
 				body, err := json.Marshal(params)
 				if err != nil {
@@ -184,6 +213,7 @@ func handleMain(config Config) {
 			} else {
 				log.Infof("域名 %s.%s 的IP为 %s 未改变, 无需更新", name, domain, localIP)
 				resp.Body.Close()
+				needUpdate = false
 				continue
 			}
 		}
