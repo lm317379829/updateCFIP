@@ -84,13 +84,13 @@ func handleMain(config Config) {
 		for _, dnsType := range dnsTypes {
 			dnsType := strings.TrimSpace(dnsType)
 			if dnsType == "A" {
-				resp, err = retryRequest("GET", "https://4.ipw.cn", nil, header)
+				resp, err = retryRequest("GET", "http://4.ipw.cn", nil, header)
 				if err != nil {
 					log.Infof("获取IPV4错误: %v", err)
 					return
 				}
 			} else if dnsType == "AAAA" {
-				resp, err = retryRequest("GET", "https://6.ipw.cn", nil, header)
+				resp, err = retryRequest("GET", "http://6.ipw.cn", nil, header)
 				if err != nil {
 					log.Infof("获取IPV6错误: %v", err)
 					return
