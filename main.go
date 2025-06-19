@@ -80,7 +80,7 @@ func handleMain(config Config) {
 
 	defer func() {
 		content = strings.TrimSpace(content)
-		if config.Telegram.Update && content != "" {
+		if config.Telegram.Update && content != "" && config.Telegram.Url != "" && config.Telegram.ID != "" {
 			// 更新IP到指定URL
 			params := map[string]string{
 				"chat_id": config.Telegram.ID,
