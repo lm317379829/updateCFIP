@@ -112,7 +112,6 @@ func handleMain(config Config) {
 			localIP := string(responseBody)
 
 			defer func() {
-				needUpdate = true
 				if config.Telegram.Update && needUpdate {
 					// 更新IP到指定URL
 					content := fmt.Sprintf("域名 %s.%s 的IP已更新为 %s", name, domain, localIP)
