@@ -140,6 +140,7 @@ func handleMain(config Config) {
 			if err != nil {
 				log.Errorf("更新 IP 到 Telegram 错误: %+v", err)
 			}
+			log.Infof("更新 IP 到 Telegram 成功: %s", content)
 		}
 	}()
 
