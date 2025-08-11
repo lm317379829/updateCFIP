@@ -3,11 +3,6 @@ name: build updateCFIP
 on:
   repository_dispatch:
   workflow_dispatch:
-    inputs:
-      ssh:
-        description: 'SSH Connection to Actions'
-        required: false
-        default: 'false'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -30,13 +25,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - uses: benjlevesque/short-sha@v2.2
-        id: short-sha
-          
-      - name: SSH Connection to Actions
-        uses: P3TERX/ssh2actions@v1.0.0
-        if: (github.event.inputs.ssh == 'true' && github.event.inputs.ssh  != 'false') || contains(github.event.action, 'ssh')
-          
       - name: Build Go
         run: |
           set +e
