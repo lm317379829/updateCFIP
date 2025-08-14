@@ -154,23 +154,24 @@ func handleMain(config Config) {
 		dnsTypes := strings.Split(domainInfo[2], ",")
 		for _, dnsType := range dnsTypes {
 			dnsType := strings.TrimSpace(dnsType)
-			if dnsType == "A" {
+			switch dnsType {
+			case "A":
 				resp, err = retryRequest("GET", "http://4.ipw.cn", nil, header)
 				if err != nil {
 					log.Warnf("获取 IPV4 地址错误: %+v", err)
-					return
+					continue
 				}
-			} else if dnsType == "AAAA" {
+			case "AAAA":
 				resp, err = retryRequest("GET", "http://6.ipw.cn", nil, header)
 				if err != nil {
 					log.Warnf("获取 IPV6 地址错误: %+v", err)
-					return
+					continue
 				}
-			} else {
-				log.Warnf("不支持的 %s, 仅支持ipv4-A、ipv6-AAAA, ", dnsType)
+			default:
+				log.Warnf("不支持的 DNS 类型 %s, 仅支持 ipv4-A、ipv6-AAAA", dnsType)
 				continue
 			}
-
+			
 			responseBody, err = io.ReadAll(resp.Body)
 			if err != nil {
 				log.Errorf("解析响应体错误: %+v", err)
