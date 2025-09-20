@@ -1,30 +1,18 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
-	"net/http"
+	"net"
 	"os"
-	"strconv"
+	"regexp"
 	"strings"
-	"time"
+	"updateCFIP/config"
+
+	"updateCFIP/base"
 
 	log "github.com/sirupsen/logrus"
 )
-
-type Config struct {
-	Key         string     `json:"key"`
-	Email       string     `json:"email"`
-	DomainInfos [][]string `json:"domainInfos"`
-	Telegram    struct {
-		Update bool   `json:"update"`
-		Url    string `json:"url"`
-		ID     string `json:"id"`
-	} `json:"telegram,omitempty"`
-}
 
 type ZoneInfos struct {
 	Result []struct {
@@ -41,211 +29,153 @@ type DNSInfos struct {
 	} `json:"result"`
 }
 
-func retryRequest(method, url string, params map[string]any, header map[string]string) (*http.Response, error) {
-	maxRetries := 5               // 最大重试次数
-	retryDelay := 2 * time.Second // 重试间隔时间
-
-	var err error
-	var req *http.Request
-	var resp *http.Response
-	client := &http.Client{
-		Timeout: 30 * time.Second, // 设置超时时间为 30 秒
-	}
-
-	for count := 0; count < maxRetries; count++ {
-		switch method {
-		case http.MethodGet:
-			req, err = http.NewRequest(http.MethodGet, url, nil)
-		case http.MethodPut, http.MethodPost:
-			body, erro := json.Marshal(params)
-			if erro != nil {
-				log.Errorf("错误: %+v", erro)
-				return nil, fmt.Errorf("格式化请求体错误: %+v", erro)
-			}
-			bodyBuffer := bytes.NewBuffer(body)
-			contentLength := strconv.Itoa(bodyBuffer.Len())
-			header["Content-Length"] = contentLength
-			req, err = http.NewRequest(method, url, bodyBuffer)
-		default:
-			return nil, fmt.Errorf("不支持的 Method: %s", method)
-		}
-
-		if err != nil {
-			log.Infof("错误: %+v", err)
-			return nil, fmt.Errorf("错误: %+v", err)
-		}
-
-		for key, value := range header {
-			req.Header.Set(key, value)
-		}
-
-		resp, err = client.Do(req)
-		if err != nil || resp.StatusCode < 200 || resp.StatusCode >= 400 {
-			// 请求失败，等待重试
-			if resp != nil {
-				defer resp.Body.Close()
-			}
-			log.Warnf("请求 %s 失败, 等待 %ds 后重试", url, retryDelay/1000000000)
-			time.Sleep(retryDelay)
-			continue
-		} else {
-			// 请求成功，返回响应
-			return resp, nil
-		}
-	}
-
-	switch {
-	case err != nil:
-		return nil, fmt.Errorf("访问 %s 失败: %+v", url, err)
-	case resp != nil && (resp.StatusCode < 200 || resp.StatusCode >= 400):
-		responseBody, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return nil, fmt.Errorf("访问 %s 失败: %d", url, resp.StatusCode)
-		}
-		respString := strings.TrimSpace(string(responseBody))
-		if respString != "" {
-			return nil, fmt.Errorf("访问 %s 失败: %d\n%s", url, resp.StatusCode, respString)
-		} else {
-			return nil, fmt.Errorf("访问 %s 失败: %d", url, resp.StatusCode)
-		}
-	default:
-		return nil, fmt.Errorf("访问 %s 失败", url)
+type Result struct {
+	Success bool `json:"success"`
+	Error   []struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
 	}
 }
 
-func handleMain(config Config) {
+func handleMain(key, email, domain string) {
 	content := ""
 
 	// 设置请求头
 	header := map[string]string{
-		"X-Auth-Key":   config.Key,
-		"X-Auth-Email": config.Email,
-		"Accept":       "application/json",
-		"User-Agent":   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.54 Safari/537.36",
+		"Accept":     "application/json",
+		"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.54 Safari/537.36",
 	}
+
+	clientParams := base.ClientParams{
+		UserAgent: header["User-Agent"],
+	}
+	client := base.NewRestyClient(clientParams).SetCommonRetryCount(3).SetCommonHeaders(header)
 
 	defer func() {
 		content = strings.TrimSpace(content)
-		if config.Telegram.Update && content != "" && config.Telegram.Url != "" && config.Telegram.ID != "" {
+		Tele := config.GetTele()
+		if Tele.Update && content != "" && Tele.Url != "" && Tele.ID != "" {
 			// 更新IP到指定URL
 			params := map[string]any{
-				"chat_id": config.Telegram.ID,
+				"chat_id": Tele.ID,
 				"text":    content,
 			}
 			header := map[string]string{
 				"Content-Type": "application/json",
 				"User-Agent":   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.54 Safari/537.36",
 			}
-			_, err := retryRequest("POST", config.Telegram.Url, params, header)
+
+			url := Tele.Url
+			resp, err := client.R().
+				SetHeaders(header).
+				SetBody(params).
+				Post(url)
+
 			if err != nil {
 				log.Errorf("更新 IP 到 Telegram 错误: %+v", err)
+				return
 			}
 			log.Infof("更新 IP 到 Telegram 成功: %s", content)
+
+			err = resp.Body.Close()
+			if err != nil {
+				log.Errorf("关闭响应体错误: %+v", err)
+			}
 		}
 	}()
 
-	for _, domainInfo := range config.DomainInfos {
-		var err error
-		var resp *http.Response
-		var responseBody []byte
-		name := domainInfo[0]
-		domain := domainInfo[1]
+	localIP := ""
+	ipv4, err := getExternalIPv4()
+	if err != nil {
+		log.Debugf("获取IPv4地址失败: %+v", err)
+	}
+	ipv6, err := getExternalIPv6()
+	if err != nil {
+		log.Debugf("获取IPv6地址失败: %+v", err)
+	}
+	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones?name=%s", domain)
+	var zoneInfos ZoneInfos
+	resp, err := client.R().
+		SetHeader("X-Auth-Email", email).
+		SetHeader("X-Auth-Key", key).
+		SetSuccessResult(&zoneInfos).
+		Get(url)
 
-		dnsTypes := strings.Split(domainInfo[2], ",")
-		for _, dnsType := range dnsTypes {
-			dnsType := strings.TrimSpace(dnsType)
-			switch dnsType {
+	if err != nil {
+		log.Errorf("获取根域名 %s 的 ZoneName 错误: %+v", domain, err)
+		content = fmt.Sprintf("获取根域名 %s 的 ZoneName 错误: %+v", domain, err)
+		return
+	}
+
+	err = resp.Body.Close()
+	if err != nil {
+		log.Errorf("关闭响应体错误: %+v", err)
+	}
+
+	if len(zoneInfos.Result) == 0 {
+		log.Warnf("未找到域名 %s 的 ZoneName", domain)
+		content = fmt.Sprintf("未找到域名 %s 的 ZoneName", domain)
+		return
+	}
+
+	zid := ""
+	if len(zoneInfos.Result) > 0 {
+		zid = zoneInfos.Result[0].ID
+		if zid == "" {
+			log.Warnf("未找到域名 %s 的 ZoneID", domain)
+			content = fmt.Sprintf("未找到域名 %s 的 ZoneID", domain)
+			return
+		}
+	}
+
+	subs := config.GetSubs()
+	for _, sub := range subs {
+		name := sub.Name
+
+		cates := sub.Cates
+		for _, cate := range cates {
+			cate := strings.TrimSpace(cate)
+			switch cate {
 			case "A":
-				resp, err = retryRequest("GET", "http://4.ipw.cn", nil, header)
-				if err != nil {
-					log.Warnf("获取 IPV4 地址错误: %+v", err)
+				if ipv4 == "" {
 					continue
 				}
+				localIP = ipv4
 			case "AAAA":
-				resp, err = retryRequest("GET", "http://6.ipw.cn", nil, header)
-				if err != nil {
-					log.Warnf("获取 IPV6 地址错误: %+v", err)
+				if ipv6 == "" {
 					continue
 				}
+				localIP = ipv6
 			default:
-				log.Warnf("不支持的 DNS 类型 %s, 仅支持 ipv4-A、ipv6-AAAA", dnsType)
+				log.Warnf("不支持的 DNS 类型 %s, 仅支持 ipv4-A、ipv6-AAAA", cate)
 				continue
 			}
-			
-			responseBody, err = io.ReadAll(resp.Body)
-			if err != nil {
-				log.Errorf("解析响应体错误: %+v", err)
-				resp.Body.Close()
-				continue
-			}
-			resp.Body.Close()
 
-			// 获取本地IP
-			localIP := string(responseBody)
 			localIPContent := fmt.Sprintf("域名 %s.%s 的 IP 应为 %s\n", name, domain, localIP)
 
-			resp, err := retryRequest("GET", fmt.Sprintf("https://api.cloudflare.com/client/v4/zones?name=%s", domain), nil, header)
-			if err != nil {
-				log.Errorf("获取根域名 %s 的 ZoneName 错误: %+v", domain, err)
-				content += localIPContent
-				return
-			}
+			url = fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/dns_records?name=%s.%s", zid, name, domain)
+			var dnsInfos DNSInfos
+			resp, err = client.R().
+				SetHeader("X-Auth-Email", email).
+				SetHeader("X-Auth-Key", key).
+				SetSuccessResult(&dnsInfos).
+				Get(url)
 
-			responseBody, err = io.ReadAll(resp.Body)
-			if err != nil {
-				log.Errorf("解析响应体错误: %+v", err)
-				content += localIPContent
-				resp.Body.Close()
-				continue
-			}
-			resp.Body.Close()
-
-			var zoneInfos ZoneInfos
-			err = json.Unmarshal(responseBody, &zoneInfos)
-			if err != nil {
-				log.Errorf("解析 ZoneInfos 错误: %+v", err)
-				content += localIPContent
-				continue
-			}
-			if len(zoneInfos.Result) == 0 {
-				log.Warnf("未找到域名 %s 的 ZoneName", domain)
-				content += localIPContent
-				continue
-			}
-			zid := zoneInfos.Result[0].ID
-			if zid == "" {
-				log.Warnf("未找到域名 %s 的 ZoneID", domain)
-				content += localIPContent
-				continue
-			}
-
-			resp, err = retryRequest("GET", fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/dns_records?name=%s.%s", zid, name, domain), nil, header)
 			if err != nil {
 				log.Warnf("获取域名 %s.%s 的 DNS 记录错误: %s", name, domain, err)
 				content += localIPContent
 				continue
 			}
-			responseBody, err = io.ReadAll(resp.Body)
+			err = resp.Body.Close()
 			if err != nil {
-				log.Errorf("解析响应体错误: %+v", err)
-				content += localIPContent
-				resp.Body.Close()
-				continue
+				log.Errorf("关闭响应体错误: %+v", err)
 			}
-			resp.Body.Close()
 
-			var dnsInfos DNSInfos
-			err = json.Unmarshal(responseBody, &dnsInfos)
-			if err != nil {
-				log.Errorf("解析 DNS 记录错误: %+v", err)
-				content += localIPContent
-				continue
-			}
 			rid := ""
 			remortIP := ""
 			proxied := false
 			for _, record := range dnsInfos.Result {
-				if record.Type == dnsType {
+				if record.Type == cate {
 					rid = record.ID
 					remortIP = record.RemortIP
 					proxied = record.Proxy
@@ -263,68 +193,134 @@ func handleMain(config Config) {
 				content += localIPContent
 				params := map[string]interface{}{
 					"id":      zid,
-					"type":    dnsType,
+					"type":    cate,
 					"name":    fmt.Sprintf("%s.%s", name, domain),
 					"content": localIP,
 					"proxied": proxied,
 				}
 
-				resp, err = retryRequest("PUT", fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/dns_records/%s", zid, rid), params, header)
+				url = fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/dns_records/%s", zid, rid)
+
+				var result Result
+				resp, err = client.R().
+					SetHeader("X-Auth-Email", email).
+					SetHeader("X-Auth-Key", key).
+					SetSuccessResult(&result).
+					SetBody(params).
+					Put(url)
+
 				if err != nil {
 					log.Errorf("域名 %s.%s 更新错误: %+v", name, domain, err)
 					continue
 				}
-				if resp.StatusCode == 200 {
-					log.Infof("成功更新 %s.%s 的IP 为 %s", name, domain, localIP)
-					resp.Body.Close()
+				err = resp.Body.Close()
+				if err != nil {
+					log.Errorf("关闭响应体错误: %+v", err)
+				}
+				if !result.Success {
+					for _, erro := range result.Error {
+						log.Errorf("域名 %s.%s 更新错误: %s", name, domain, erro.Message)
+						content += fmt.Sprintf("域名 %s.%s 更新错误: %s\n", name, domain, erro.Message)
+					}
+					content += localIPContent
 				} else {
-					log.Warnf("%s.%s的ip更新失败", name, domain)
-					resp.Body.Close()
+					log.Infof("域名 %s.%s 的IP已更新为 %s", name, domain, localIP)
+					content += fmt.Sprintf("域名 %s.%s 的IP已更新为 %s\n", name, domain, localIP)
 				}
 			} else {
 				log.Infof("域名 %s.%s 的IP为 %s 未改变, 无需更新", name, domain, localIP)
-				resp.Body.Close()
+				err = resp.Body.Close()
+				if err != nil {
+					log.Errorf("关闭响应体错误: %+v", err)
+				}
 				continue
 			}
 		}
 	}
 }
 
+// 获取外网IPv4地址
+func getExternalIPv4() (string, error) {
+	// 连接到一个外部IPv4地址，这里使用Google的DNS服务器
+	ipv4 := config.GetDns("ipv4")
+	if ipv4 == "" {
+		ipv4 = "223.5.5.5"
+	}
+	conn, err := net.Dial("tcp4", fmt.Sprintf("%s:80", ipv4))
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		err := conn.Close()
+		if err != nil {
+			log.Errorf("关闭连接错误: %+v", err)
+		}
+	}()
+
+	// 获取本地地址信息
+	localAddr := conn.LocalAddr().String()
+	// 分割IP和端口
+	ip := strings.Split(localAddr, ":")[0]
+	return ip, nil
+}
+
+// 获取外网IPv6地址
+func getExternalIPv6() (string, error) {
+	// 连接到一个外部IPv6地址，这里使用Google的IPv6 DNS服务器
+	ipv6 := config.GetDns("ipv6")
+	if ipv6 == "" {
+		ipv6 = "[2400:3200::1]"
+	}
+	conn, err := net.Dial("tcp6", fmt.Sprintf("%s:80", ipv6))
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		err := conn.Close()
+		if err != nil {
+			log.Errorf("关闭连接错误: %+v", err)
+		}
+	}()
+
+	// 获取本地地址信息
+	localAddr := conn.LocalAddr().String()
+	// 分割IP和端口，IPv6地址格式为[ipv6]:port
+	re := regexp.MustCompile(`^\[([a-fA-F0-9:]+)\]:\d+$`)
+	matches := re.FindStringSubmatch(localAddr)
+	if len(matches) != 2 {
+		return "", fmt.Errorf("无法解析IPv6地址")
+	}
+	ip := matches[1]
+	return ip, nil
+}
+
 func main() {
 	// 定义命令行参数
 	filePath := flag.String("file", "config.json", "文件路径和名称")
+	// 加载配置文件和命令行参数
+	err := config.LoadConfig(*filePath)
+	if err != nil {
+		log.Warnf("无法加载配置文件，错误: %+v", err)
+	}
 
 	// 解析命令行参数
 	flag.Parse()
 
+	key := config.GetKey()
+	email := config.GetEmail()
+	domain := config.GetDomain()
+	if key == "" || email == "" || domain == "" {
+		log.Fatalf("配置文件缺少必要的字段: Key, Email 或 Domain")
+	}
+
 	// 设置日志输出
 	log.SetOutput(os.Stdout)
-	log.SetLevel(log.InfoLevel)
-
-	// 打开文件
-	file, err := os.Open(*filePath)
-	if err != nil {
-		log.Errorf("无法打开配置文件: %+v", err)
-		return
-	}
-	defer file.Close()
-
-	// 读取文件内容
-	bytes, err := io.ReadAll(file)
-	if err != nil {
-		log.Errorf("无法读取配置文件: %+v", err)
-		return
+	if config.GetDebug() {
+		log.SetLevel(log.DebugLevel)
+		log.Debug("调试模式已启用")
+	} else {
+		log.SetLevel(log.InfoLevel)
 	}
 
-	// 解析 JSON 文件内容
-	var config Config
-	if err := json.Unmarshal(bytes, &config); err != nil {
-		log.Errorf("无法解析配置文件: %+v", err)
-		return
-	}
-	if config.Key == "" || config.Email == "" {
-		log.Errorf("Key 或 Email 不能为空")
-		return
-	}
-	handleMain(config)
+	handleMain(key, email, domain)
 }
