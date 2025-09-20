@@ -297,14 +297,14 @@ func getExternalIPv6() (string, error) {
 func main() {
 	// 定义命令行参数
 	filePath := flag.String("file", "config.json", "文件路径和名称")
+	// 解析命令行参数
+	flag.Parse()
+
 	// 加载配置文件和命令行参数
 	err := config.LoadConfig(*filePath)
 	if err != nil {
-		log.Warnf("无法加载配置文件，错误: %+v", err)
+		log.Errorf("无法加载配置文件，错误: %+v", err)
 	}
-
-	// 解析命令行参数
-	flag.Parse()
 
 	key := config.GetKey()
 	email := config.GetEmail()
