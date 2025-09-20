@@ -55,7 +55,12 @@ func LoadConfig(configPath string) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() {
+		err := file.Close()
+		if err != nil {
+			log.Errorf("关闭文件错误: %+v", err)
+		}
+	}()
 
 	bytes, err := io.ReadAll(file)
 	if err != nil {
@@ -86,10 +91,10 @@ func GetPreferIPV() string {
 }
 
 // 提取DNS值
-func GetDns(preferIPV string) string {
+func GetDns(preferIPV string) (dns, port string) {
 	// 遍历DNS列表，返回第一个符合偏好IPV模式的DNS
 	for _, dns := range GlobalConfig.Dns {
-		dns = removePort(dns)
+		dns, port = removePort(dns)
 		parsedIP := net.ParseIP(dns)
 		if parsedIP != nil {
 			if parsedIP.To4() == nil {
@@ -101,21 +106,21 @@ func GetDns(preferIPV string) string {
 				}
 				if preferIPV == "ipv6" || preferIPV == "auto" {
 					log.Debugf("client 使用指定的 DNS: %s", dns)
-					return dns
+					return dns, port
 				}
 			} else {
 				if preferIPV == "ipv4" || preferIPV == "auto" {
 					log.Debugf("client 使用指定的 DNS: %s", dns)
-					return dns
+					return dns, port
 				}
 			}
 		} else {
 			// 如果不是IP地址，直接返回
 			log.Warnf("GetDns 函数检测到非IP地址的DNS: %s", dns)
-			return dns
+			return dns, port
 		}
 	}
-	return ""
+	return "", ""
 }
 
 // 提取调试模式
@@ -148,15 +153,22 @@ func GetSubs() []Sub {
 	return GlobalConfig.Subs
 }
 
-func removePort(addr string) string {
+func removePort(addr string) (ip, port string) {
 	// 处理 [IPv6]:端口
-	re := regexp.MustCompile(`^\[([a-fA-F0-9:]+)\](?::\d+)?$`)
-	if matches := re.FindStringSubmatch(addr); len(matches) == 2 {
-		return matches[1]
+	re := regexp.MustCompile(`^\[([a-fA-F0-9:]+)\](:\d+)?$`)
+	matches := re.FindStringSubmatch(addr)
+	if len(matches) == 3 {
+		ip = matches[1]
+		if matches[2] != "" {
+			port = matches[2][1:] // 去掉冒号
+		}
+		return ip, port
 	}
 	// 处理 IPv4:端口 或 域名:端口
 	if idx := strings.LastIndex(addr, ":"); idx != -1 && strings.Count(addr, ":") == 1 {
-		return addr[:idx]
+		ip = addr[:idx]
+		port = addr[idx+1:]
+		return ip, port
 	}
-	return addr
+	return addr, ""
 }

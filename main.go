@@ -242,7 +242,7 @@ func handleMain(key, email, domain string) {
 // 获取外网IPv4地址
 func getExternalIPv4() (string, error) {
 	// 连接到一个外部IPv4地址，这里使用Google的DNS服务器
-	ipv4 := config.GetDns("ipv4")
+	ipv4, _ := config.GetDns("ipv4")
 	if ipv4 == "" {
 		ipv4 = "223.5.5.5"
 	}
@@ -267,7 +267,7 @@ func getExternalIPv4() (string, error) {
 // 获取外网IPv6地址
 func getExternalIPv6() (string, error) {
 	// 连接到一个外部IPv6地址，这里使用Google的IPv6 DNS服务器
-	ipv6 := config.GetDns("ipv6")
+	ipv6, _ := config.GetDns("ipv6")
 	if ipv6 == "" {
 		ipv6 = "[2400:3200::1]"
 	}
