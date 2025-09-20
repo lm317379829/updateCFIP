@@ -25,8 +25,14 @@ type Tele struct {
 	ID     string `json:"id"`     // Telegram聊天ID
 }
 
+type API struct {
+	IPv4 string `json:"ipv4"` // 获取DNS记录的API
+	IPv6 string `json:"ipv6"` // 获取DNS记录的API
+}
+
 type Config struct {
-	Debug     bool     `json:"debug"`
+	Debug     bool     `json:"debug"`     // 调试模式
+	APIs      API      `json:"api"`       // API地址
 	Key       string   `json:"key"`       // 密钥
 	Email     string   `json:"email"`     // 邮箱
 	Domain    string   `json:"domain"`    // 域名
@@ -126,6 +132,11 @@ func GetDns(preferIPV string) (dns, port string) {
 // 提取调试模式
 func GetDebug() bool {
 	return GlobalConfig.Debug
+}
+
+// 提取API地址
+func GetAPI() API {
+	return GlobalConfig.APIs
 }
 
 // 提取密钥

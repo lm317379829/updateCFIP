@@ -1,12 +1,22 @@
 {
-	"email": "账户email",
-	"key": "账户key",
-	"domainInfos": [
-		["名称", "根域", "A,AAAA"]
+	"email": "CF邮箱",
+	"key": "CF密钥",
+	"domain": "根域名",
+	"dns": ["223.5.5.5", "2400:3200::1"], // 可自行更改为其他IPv4/IPv6的DNS地址，用于获取本机IPv4/IPv6地址与解析
+	"apis": {
+		"ipv4": "获取ipv4地址的api",
+		"ipv6": "获取ipv6地址的api"
+	}
+	"preferIPV": "4",
+	"subs": [
+		{
+			"name": "二级域名", 
+			"cates": ["A", "AAAA"] //ipv4:A、ipv6:AAAA
+		}
 	],
 	"telegram": {
 		"update": true, 
 		"id": "对话ID", 
-		"url": "API地址"
+		"url": "API"
 	}
 }

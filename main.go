@@ -261,6 +261,38 @@ func getExternalIPv4() (string, error) {
 	localAddr := conn.LocalAddr().String()
 	// 分割IP和端口
 	ip := strings.Split(localAddr, ":")[0]
+	if IsPrivateIP(ip) {
+		log.Debugf("获取到的IPv4地址 %s 是内网地址", ip)
+		header := map[string]string{
+			"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.54 Safari/537.36",
+		}
+
+		APIs := config.GetAPI()
+		url := APIs.IPv4
+		if url == "" {
+			log.Errorf("未配置获取外网IPv4地址的API")
+			return "", fmt.Errorf("未配置获取外网IPv4地址的API")
+		}
+
+		clientParams := base.ClientParams{
+			UserAgent: header["User-Agent"],
+		}
+		client := base.NewRestyClient(clientParams).SetCommonRetryCount(3).SetCommonHeaders(header)
+
+		resp, err := client.R().SetHeaders(header).Get(url)
+
+		if err != nil {
+			return "", err
+		}
+		ip = strings.TrimSpace(resp.String())
+		err = resp.Body.Close()
+		if err != nil {
+			log.Errorf("关闭响应体错误: %+v", err)
+		}
+		if IsPrivateIP(ip) {
+			return "", fmt.Errorf("获取到的IPv4地址 %s 仍然是内网地址", ip)
+		}
+	}
 	return ip, nil
 }
 
@@ -291,7 +323,104 @@ func getExternalIPv6() (string, error) {
 		return "", fmt.Errorf("无法解析IPv6地址")
 	}
 	ip := matches[1]
+	if IsPrivateIP(ip) {
+		log.Debugf("获取到的IPv6地址 %s 是内网地址", ip)
+		header := map[string]string{
+			"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.54 Safari/537.36",
+		}
+
+		APIs := config.GetAPI()
+		url := APIs.IPv6
+		if url == "" {
+			log.Errorf("未配置获取外网IPv6地址的API")
+			return "", fmt.Errorf("未配置获取外网IPv6地址的API")
+		}
+
+		clientParams := base.ClientParams{
+			UserAgent: header["User-Agent"],
+		}
+		client := base.NewRestyClient(clientParams).SetCommonRetryCount(3).SetCommonHeaders(header)
+
+		resp, err := client.R().SetHeaders(header).Get(url)
+
+		if err != nil {
+			return "", err
+		}
+
+		ip = strings.TrimSpace(resp.String())
+		err = resp.Body.Close()
+		if err != nil {
+			log.Errorf("关闭响应体错误: %+v", err)
+		}
+		if IsPrivateIP(ip) {
+			return "", fmt.Errorf("获取到的IPv4地址 %s 仍然是内网地址", ip)
+		}
+	}
 	return ip, nil
+}
+
+// IsPrivateIP 判断IP地址是否为内网IP
+func IsPrivateIP(ipStr string) bool {
+	// 解析IP地址
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return false
+	}
+
+	// 检查IPv4私有地址
+	if ip.To4() != nil {
+		return isPrivateIPv4(ip)
+	}
+
+	// 检查IPv6私有地址
+	return isPrivateIPv6(ip)
+}
+
+// isPrivateIPv4 判断IPv4是否为私有地址
+func isPrivateIPv4(ip net.IP) bool {
+	lenIP := len(ip)
+	// 10.0.0.0/8
+	if ip[lenIP-4] == 10 {
+		return true
+	}
+
+	// 172.16.0.0/12 (172.16.0.0 - 172.31.255.255)
+	if ip[lenIP-4] == 172 && ip[lenIP-3] >= 16 && ip[lenIP-3] <= 31 {
+		return true
+	}
+
+	// 192.168.0.0/16
+	if ip[lenIP-4] == 192 && ip[lenIP-3] == 168 {
+		return true
+	}
+
+	// 127.0.0.0/8 (本地环回)
+	if ip[lenIP-4] == 127 {
+		return true
+	}
+
+	return false
+}
+
+// isPrivateIPv6 判断IPv6是否为私有地址
+func isPrivateIPv6(ip net.IP) bool {
+	// 检查环回地址 ::1
+	if ip.Equal(net.IPv6loopback) {
+		return true
+	}
+
+	// 检查链路本地地址 fe80::/10
+	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+		return true
+	}
+
+	// 检查唯一本地地址 fc00::/7
+	// 包括 fc00::/8 和 fd00::/8 范围
+	if (ip[0] & 0xfe) == 0xfc {
+		return true
+	}
+
+	return false
 }
 
 func main() {
